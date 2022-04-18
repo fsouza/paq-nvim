@@ -14,7 +14,7 @@ local messages = {
 
 -- This is done only once. Doing it for every process seems overkill
 local env = {}
-local envfn = vim.fn.has('nvim-0.6') == 1 and uv.os_environ or vim.fn.environ  -- compat
+local envfn = vim.fn.has("nvim-0.6") == 1 and uv.os_environ or vim.fn.environ -- compat
 for var, val in pairs(envfn()) do
     table.insert(env, ("%s=%s"):format(var, val))
 end
@@ -272,6 +272,5 @@ return setmetatable({
     log_open = function() vim.cmd("sp " .. LOGFILE) end,
     log_clean = function() return assert(uv.fs_unlink(LOGFILE)) and vim.notify(" Paq: log file deleted") end,
     load = function(pkg) register(pkg) end,
-    paq = register, -- TODO: deprecate. not urgent
 }, {__call = function(self, tbl) packages = {} vim.tbl_map(register, tbl) return self end,
 })
