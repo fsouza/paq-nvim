@@ -9,7 +9,6 @@ local messages = {
     install = { ok = "Installed", err = "Failed to install" },
     update = { ok = "Updated", err = "Failed to update", nop = "(up-to-date)" },
     remove = { ok = "Removed", err = "Failed to remove" },
-    hook = { ok = "Ran hook for", err = "Failed to run hook for" },
 }
 
 -- This is done only once. Doing it for every process seems overkill
@@ -28,7 +27,6 @@ vim.cmd([[
     command! PaqList     lua require('paq').list()
     command! PaqLogOpen  lua require('paq').log_open()
     command! PaqLogClean lua require('paq').log_clean()
-    command! -nargs=1 -complete=customlist,v:lua.require'paq'._get_hooks PaqRunHook lua require('paq')._run_hook(<f-args>)
 ]])
 
 local function report(op, name, res, n, total)
@@ -73,38 +71,46 @@ local function call_proc(process, args, cwd, cb)
     end
 end
 
-local function run_hook(pkg, counter, sync)
-    local t = type(pkg.run)
-    if t == "function" then
-        vim.cmd("packadd " .. pkg.name)
-        local res = pcall(pkg.run) and "ok" or "err"
-        report("hook", pkg.name, res)
-        return counter and counter(pkg.name, res, sync)
-    elseif t == "string" then
-        local args = {}
-        for word in pkg.run:gmatch("%S+") do
-            table.insert(args, word)
+local function update_submodules(pkg, counter, sync, status)
+    call_proc("git", { "-C", pkg.dir, "submodule", "update", "--init", "--recursive" }, nil, function(ok_submodule)
+        if ok_submodule then
+            pkg.exists = true
+            pkg.status = status
+            counter(pkg.name, "ok", sync)
+        else
+            counter(pkg.name, "err", sync)
         end
-        call_proc(table.remove(args, 1), args, pkg.dir, function(ok)
-            local res = ok and "ok" or "err"
-            report("hook", pkg.name, res)
-            return counter and counter(pkg.name, res, sync)
-        end)
-        return true
-    end
+    end)
+end
+
+local function git_checkout(pkg, counter, sync, status)
+    call_proc("git", { "-C", pkg.dir, "checkout", pkg.ref }, nil, function(ok_checkout)
+        if ok_checkout then
+            update_submodules(pkg, counter, sync, status)
+        else
+            counter(pkg.name, "err", sync)
+        end
+    end)
 end
 
 local function clone(pkg, counter, sync)
-    local args = { "clone", pkg.url, "--depth=1", "--recurse-submodules", "--shallow-submodules" }
+    local args = { "clone", pkg.url, "--recurse-submodules", "--shallow-submodules" }
     if pkg.branch then
         vim.list_extend(args, { "-b", pkg.branch })
     end
-    vim.list_extend(args, { pkg.dir })
+    if not pkg.ref then
+        table.insert(args, "--depth=1")
+    end
+    table.insert(args, pkg.dir)
     call_proc("git", args, nil, function(ok)
         if ok then
             pkg.exists = true
-            pkg.status = "installed"
-            return pkg.run and run_hook(pkg, counter, sync) or counter(pkg.name, "ok", sync)
+            if pkg.ref then
+                git_checkout(pkg, counter, sync, "installed")
+            else
+                pkg.status = "installed"
+                counter(pkg.name, "ok", sync)
+            end
         else
             counter(pkg.name, "err", sync)
         end
@@ -126,20 +132,24 @@ end
 
 local function pull(pkg, counter, sync)
     local hash = get_git_hash(pkg.dir)
-    call_proc("git", { "pull", "--recurse-submodules", "--update-shallow" }, pkg.dir, function(ok)
-        if not ok then
-            counter(pkg.name, "err", sync)
-        elseif get_git_hash(pkg.dir) ~= hash then
-            pkg.status = "updated"
-            return pkg.run and run_hook(pkg, counter, sync) or counter(pkg.name, "ok", sync)
-        else
-            counter(pkg.name, "nop", sync)
-        end
-    end)
+    -- Don't do anything if pkg.ref is already the current hash.
+    if hash ~= pkg.ref then
+        call_proc("git", { "-C", pkg.dir, "pull", "--update-shallow" }, nil, function(ok)
+            if not ok then
+                counter(pkg.name, "err", sync)
+            elseif pkg.ref then
+                git_checkout(pkg, counter, sync, "updated")
+            elseif get_git_hash(pkg.dir) ~= hash then
+                update_submodules(pkg, counter, sync, "updated")
+            else
+                counter(pkg.name, "nop", sync)
+            end
+        end)
+    end
 end
 
 local function clone_or_pull(pkg, counter)
-    if pkg.exists and not pkg.pin then
+    if pkg.exists then
         pull(pkg, counter, "update")
     else
         clone(pkg, counter, "install")
@@ -177,7 +187,7 @@ local function check_rm()
     return to_remove
 end
 
-local function rmdir(dir, name, t)
+local function rmdir(dir, _, t)
     if t == "directory" then
         return walk_dir(dir, rmdir) and uv.fs_rmdir(dir)
     else
@@ -207,13 +217,20 @@ local function exe_op(op, fn, pkgs)
     end
 end
 
--- stylua: ignore
 local function list()
-    local installed = vim.tbl_filter(function(pkg) return pkg.exists end, packages)
-    table.sort(installed, function(a, b) return a.name < b.name end)
+    local installed = vim.tbl_filter(function(pkg)
+        return pkg.exists
+    end, packages)
+    table.sort(installed, function(a, b)
+        return a.name < b.name
+    end)
 
-    local removed = vim.tbl_filter(function(pkg) return pkg.status == "removed" end, packages)
-    table.sort(removed, function(a, b) return a.name < b.name end)
+    local removed = vim.tbl_filter(function(pkg)
+        return pkg.status == "removed"
+    end, packages)
+    table.sort(removed, function(a, b)
+        return a.name < b.name
+    end)
 
     local sym_tbl = { installed = "+", updated = "*", removed = " " }
     for header, pkgs in pairs({ ["Installed packages:"] = installed, ["Recently removed:"] = removed }) do
@@ -253,24 +270,63 @@ local function register(args)
         dir = dir,
         exists = vim.fn.isdirectory(dir) ~= 0,
         status = "listed", -- TODO: should probably merge this with `exists` in the future...
-        pin = args.pin,
-        run = args.run,
+        ref = args.ref,
         url = args.url or "https://github.com/" .. args[1] .. ".git",
     }
 end
 
--- stylua: ignore
 return setmetatable({
-    install = function() exe_op("install", clone, vim.tbl_filter(function(pkg) return not pkg.exists and pkg.status ~= "removed" end, packages)) end,
-    update = function() exe_op("update", pull, vim.tbl_filter(function(pkg) return pkg.exists and not pkg.pin end, packages)) end,
-    clean = function() exe_op("remove", remove, check_rm()) end,
-    sync = function(self) self:clean() exe_op("sync", clone_or_pull, vim.tbl_filter(function(pkg) return pkg.status ~= "removed" end, packages)) end,
-    setup = function(self, args) for k, v in pairs(args) do cfg[k] = v end return self end,
-    _run_hook = function(name) return run_hook(packages[name]) end,
-    _get_hooks = function() return vim.tbl_keys(vim.tbl_map(function(pkg) return pkg.run end, packages)) end,
+    install = function()
+        exe_op(
+            "install",
+            clone,
+            vim.tbl_filter(function(pkg)
+                return not pkg.exists and pkg.status ~= "removed"
+            end, packages)
+        )
+    end,
+    update = function()
+        exe_op(
+            "update",
+            pull,
+            vim.tbl_filter(function(pkg)
+                return pkg.exists
+            end, packages)
+        )
+    end,
+    clean = function()
+        exe_op("remove", remove, check_rm())
+    end,
+    sync = function(self)
+        self:clean()
+        exe_op(
+            "sync",
+            clone_or_pull,
+            vim.tbl_filter(function(pkg)
+                return pkg.status ~= "removed"
+            end, packages)
+        )
+    end,
+    setup = function(self, args)
+        for k, v in pairs(args) do
+            cfg[k] = v
+        end
+        return self
+    end,
     list = list,
-    log_open = function() vim.cmd("sp " .. LOGFILE) end,
-    log_clean = function() return assert(uv.fs_unlink(LOGFILE)) and vim.notify(" Paq: log file deleted") end,
-    load = function(pkg) register(pkg) end,
-}, {__call = function(self, tbl) packages = {} vim.tbl_map(register, tbl) return self end,
+    log_open = function()
+        vim.cmd("sp " .. LOGFILE)
+    end,
+    log_clean = function()
+        return assert(uv.fs_unlink(LOGFILE)) and vim.notify(" Paq: log file deleted")
+    end,
+    load = function(pkg)
+        register(pkg)
+    end,
+}, {
+    __call = function(self, tbl)
+        packages = {}
+        vim.tbl_map(register, tbl)
+        return self
+    end,
 })
