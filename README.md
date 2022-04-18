@@ -73,9 +73,7 @@ Calling the `paq` function per package is deprecated. Users should now pass a li
 | as     | string   | Name to use for the package locally                       |
 | branch | string   | Branch of the repository                                  |
 | opt    | boolean  | Optional packages are not loaded on startup               |
-| pin    | boolean  | Pinned packages are not updated                           |
-| run    | string   | Shell command to run after install/update                 |
-| run    | function | Lua function to run after install/update                  |
+| ref    | string   | Commit hash to pin the repo on (can also be set to a tag) |
 | url    | string   | URL of the remote repository, useful for non-GitHub repos |
 
 For more details on each option, refer to the
