@@ -72,7 +72,7 @@ local function call_proc(process, args, cwd, cb)
 end
 
 local function run_hook(pkg, counter, sync)
-    call_proc(pkg.run.cmd, pkg.run.args, pkg.run.dir or pkg.dir, function(ok)
+    call_proc(pkg.run.cmd, pkg.run.args or {}, pkg.run.dir or pkg.dir, function(ok)
         local res = ok and "ok" or "err"
         report("hook", pkg.name, res)
         counter(pkg.name, res, sync)
