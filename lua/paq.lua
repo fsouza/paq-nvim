@@ -71,12 +71,24 @@ local function call_proc(process, args, cwd, cb)
     end
 end
 
+local function run_hook(pkg, counter, sync)
+    call_proc(pkg.run.cmd, pkg.run.args, pkg.run.dir or pkg.dir, function(ok)
+        local res = ok and "ok" or "err"
+        report("hook", pkg.name, res)
+        counter(pkg.name, res, sync)
+    end)
+end
+
 local function update_submodules(pkg, counter, sync, status)
     call_proc("git", { "-C", pkg.dir, "submodule", "update", "--init", "--recursive" }, nil, function(ok_submodule)
         if ok_submodule then
             pkg.exists = true
-            pkg.status = status
-            counter(pkg.name, "ok", sync)
+            if pkg.run then
+                run_hook(pkg, counter, sync)
+            else
+                pkg.status = status
+                counter(pkg.name, "ok", sync)
+            end
         else
             counter(pkg.name, "err", sync)
         end
