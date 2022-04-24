@@ -9,6 +9,7 @@ local messages = {
     install = { ok = "Installed", err = "Failed to install" },
     update = { ok = "Updated", err = "Failed to update", nop = "(up-to-date)" },
     remove = { ok = "Removed", err = "Failed to remove" },
+    hook = { ok = "Ran hook for", err = "Failed to run hook for" },
 }
 
 -- This is done only once. Doing it for every process seems overkill
@@ -121,7 +122,11 @@ local function clone(pkg, counter, sync)
                 git_checkout(pkg, counter, sync, "installed")
             else
                 pkg.status = "installed"
-                counter(pkg.name, "ok", sync)
+                if pkg.run then
+                    run_hook(pkg, counter, sync)
+                else
+                    counter(pkg.name, "ok", sync)
+                end
             end
         else
             counter(pkg.name, "err", sync)
@@ -284,6 +289,7 @@ local function register(args)
         status = "listed", -- TODO: should probably merge this with `exists` in the future...
         ref = args.ref,
         url = args.url or "https://github.com/" .. args[1] .. ".git",
+        run = args.run,
     }
 end
 
