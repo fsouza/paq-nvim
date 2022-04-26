@@ -111,9 +111,6 @@ local function clone(pkg, counter, sync)
     if pkg.branch then
         vim.list_extend(args, { "-b", pkg.branch })
     end
-    if not pkg.ref then
-        table.insert(args, "--depth=1")
-    end
     table.insert(args, pkg.dir)
     call_proc("git", args, nil, function(ok)
         if ok then
