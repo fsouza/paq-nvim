@@ -283,9 +283,9 @@ local function register(args)
         branch = args.branch,
         dir = dir,
         exists = vim.fn.isdirectory(dir) ~= 0,
-        status = "listed", -- TODO: should probably merge this with `exists` in the future...
+        status = "listed",
         ref = args.ref,
-        url = args.url or "https://github.com/" .. args[1] .. ".git",
+        url = args.url or "git@github.com:" .. args[1] .. ".git",
         run = args.run,
     }
 end
