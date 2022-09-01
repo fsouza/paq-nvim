@@ -3,7 +3,7 @@ local cfg = {
     path = vim.fn.stdpath("data") .. "/site/pack/paqs/",
     verbose = false,
 }
-local LOGFILE = vim.fn.stdpath("cache") .. "/paq.log"
+local LOGFILE = vim.fn.stdpath("log") .. "/paq.log"
 local packages = {} -- 'name' = {options...} pairs
 local messages = {
     install = { ok = "Installed", err = "Failed to install" },
