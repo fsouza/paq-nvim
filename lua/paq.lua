@@ -163,6 +163,8 @@ local function pull(pkg, counter, sync)
                 counter(pkg.name, "nop", sync)
             end
         end)
+    else
+        counter(pkg.name, "nop", sync)
     end
 end
 
