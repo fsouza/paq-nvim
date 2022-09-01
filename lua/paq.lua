@@ -141,6 +141,9 @@ local function get_git_hash(dir)
         end
     end
     local head_ref = first_line(dir .. "/.git/HEAD")
+    if head_ref and string.find(head_ref, "^%x+$") then
+        return head_ref
+    end
     return head_ref and first_line(dir .. "/.git/" .. head_ref:gsub("ref: ", ""))
 end
 
